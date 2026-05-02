@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAGO 긴급 알림</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#ff4444" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="긴급알림" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f0f1a;
+      --surface: #1a1a2e;
+      --surface2: #16213e;
+      --accent: #ff4444;
+      --accent2: #ff6b6b;
+      --warning: #ffa500;
+      --success: #00d4aa;
+      --text: #e8e8f0;
+      --text2: #9999bb;
+      --border: #2a2a4a;
+      --radius: 12px;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    header h1 { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: 0.5px; }
+    header .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+    .status-bar {
+      background: var(--surface2);
+      padding: 10px 20px;
+      font-size: 13px;
+      color: var(--text2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-indicator { display: flex; align-items: center; gap: 6px; }
+    main { flex: 1; padding: 16px; max-width: 600px; margin: 0 auto; width: 100%; }
+
+    /* Setup Section */
+    #setup-section {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 16px;
+      border: 1px solid var(--border);
+    }
+    #setup-section h2 { font-size: 16px; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 6px; }
+    .form-group input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus { border-color: var(--accent); }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent2); }
+    .btn-full { width: 100%; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Emergency Card */
+    .emergency-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 2px solid var(--accent);
+      margin-bottom: 16px;
+      overflow: hidden;
+      animation: emergencyPulse 2s ease-in-out infinite;
+    }
+    @keyframes emergencyPulse {
+      0%, 100% { border-color: var(--accent); box-shadow: 0 0 0 0 rgba(255,68,68,0); }
+      50% { border-color: var(--accent2); box-shadow: 0 0 20px 4px rgba(255,68,68,0.3); }
+    }
+    .emergency-card.acknowledged { border-color: var(--success); animation: none; }
+    .emergency-card.responded { border-color: var(--text2); animation: none; opacity: 0.7; }
+    .emergency-header {
+      background: var(--accent);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .emergency-card.acknowledged .emergency-header { background: var(--success); }
+    .emergency-card.responded .emergency-header { background: var(--text2); }
+    .emergency-header h3 { font-size: 15px; font-weight: 700; color: #fff; flex: 1; }
+    .emergency-header .time { font-size: 12px; color: rgba(255,255,255,0.8); }
+    .emergency-body { padding: 16px; }
+    .shot-info { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+    .shot-code {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-family: monospace;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .project-name { font-size: 13px; color: var(--text2); }
+    .response-buttons { display: grid; gap: 10px; margin-top: 12px; }
+    .response-btn {
+      padding: 14px 16px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .response-btn:active { transform: scale(0.97); }
+    .response-btn.r10 { background: #00d4aa; color: #000; }
+    .response-btn.r30 { background: #ffa500; color: #000; }
+    .response-btn.rno { background: #ff4444; color: #fff; }
+    .response-btn .label { flex: 1; text-align: left; }
+    .confirm-btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      animation: confirmPulse 1s ease-in-out infinite;
+    }
+    @keyframes confirmPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+    }
+    .reminder-badge {
+      background: var(--accent);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 10px;
+      margin-left: 6px;
+    }
+
+    /* Empty state */
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state h3 { font-size: 16px; color: var(--text); margin-bottom: 8px; }
+
+    /* Section title */
+    .section-title {
+      font-size: 13px;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin: 20px 0 10px;
+      font-weight: 600;
+    }
+
+    /* Push status */
+    .push-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .push-status .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .push-status .dot.green { background: var(--success); }
+    .push-status .dot.red { background: var(--accent); }
+    .push-status .dot.yellow { background: var(--warning); }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px 20px;
+      border-radius: 30px;
+      font-size: 14px;
+      z-index: 999;
+      transition: transform 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+      max-width: 90vw;
+      text-align: center;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="dot"></div>
+    <h1>MAGO 긴급 알림</h1>
+    <div style="flex:1"></div>
+    <div class="push-status">
+      <div class="dot yellow" id="push-dot"></div>
+      <span id="push-label">초기화 중...</span>
+    </div>
+  </header>
+
+  <div class="status-bar">
+    <div class="status-indicator">
+      <span>👤</span>
+      <span id="user-display">로그인 필요</span>
+    </div>
+    <div class="status-indicator">
+      <span>🔔</span>
+      <span id="active-count">활성 긴급 0건</span>
+    </div>
+  </div>
+
+  <main>
+    <!-- 설정 섹션 -->
+    <div id="setup-section">
+      <h2>🔐 사용자 설정</h2>
+      <div class="form-group">
+        <label>ShotGrid 사용자 ID</label>
+        <input type="number" id="user-id-input" placeholder="ShotGrid User ID 입력" />
+      </div>
+      <div class="form-group">
+        <label>이름 (표시용)</label>
+        <input type="text" id="user-name-input" placeholder="본인 이름 입력" />
+      </div>
+      <button class="btn btn-primary btn-full" id="setup-btn" onclick="setupUser()">
+        ✅ 설정 저장 및 알림 활성화
+      </button>
+      <div style="margin-top:10px; font-size:12px; color:var(--text2)">
+        * 처음 한 번만 설정하면 이후 자동으로 알림이 수신됩니다.
+      </div>
+    </div>
+
+    <!-- 활성 긴급 알림 -->
+    <div id="emergency-section" style="display:none">
+      <div class="section-title">활성 긴급 알림</div>
+      <div id="emergency-list"></div>
+      <div id="empty-state" class="empty-state" style="display:none">
+        <div class="icon">✅</div>
+        <h3>현재 긴급 상황 없음</h3>
+        <p>긴급 수정 요청이 발생하면 즉시 알림이 울립니다.</p>
+      </div>
+    </div>
+
+    <!-- 최근 처리 내역 -->
+    <div id="history-section" style="display:none">
+      <div class="section-title">최근 처리 내역</div>
+      <div id="history-list"></div>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+
+  <script>
+    const API_BASE = "";
+    let currentUserId = null;
+    let currentUserName = null;
+    let swRegistration = null;
+    let pollInterval = null;
+    let focusedEmergencyId = null;
+    let hasUser = false;
+
+    // ── URL 파라미터 처리 ──────────────────────────────────────────
+    function checkUrlParam() {
+      const params = new URLSearchParams(window.location.search);
+
+      const emergencyId = params.get("emergency");
+      if (emergencyId) focusedEmergencyId = emergencyId;
+
+      const urlUserId = params.get("userId");
+      const urlUserName = params.get("userName");
+
+      if (urlUserId && urlUserName) {
+        currentUserId = parseInt(urlUserId);
+        currentUserName = decodeURIComponent(urlUserName);
+        localStorage.setItem("mago_user_id", urlUserId);
+        localStorage.setItem("mago_user_name", currentUserName);
+        document.getElementById("user-display").textContent = currentUserName;
+
+        document.getElementById("setup-section").innerHTML = `
+          <div style="text-align:center; padding:8px 0;">
+            <div style="font-size:40px; margin-bottom:12px;">👋</div>
+            <div style="font-size:18px; font-weight:700; margin-bottom:6px;">${currentUserName}님 안녕하세요!</div>
+            <div style="font-size:13px; color:var(--text2); margin-bottom:20px;">
+              아래 버튼을 눌러 긴급 알림을 활성화해주세요.<br>
+              처음 한 번만 하면 이후 자동으로 알림을 받습니다.
+            </div>
+            <button class="btn btn-primary btn-full" id="setup-btn" onclick="activateFromLink()">
+              🔔 알림 활성화
+            </button>
+          </div>`;
+        return true;
+      }
+      return false;
+    }
+
+    // ── 저장된 사용자 불러오기 ────────────────────────────────────
+    function loadSavedUser() {
+      const savedId = localStorage.getItem("mago_user_id");
+      const savedName = localStorage.getItem("mago_user_name");
+      if (savedId && savedName) {
+        currentUserId = parseInt(savedId);
+        currentUserName = savedName;
+        document.getElementById("user-id-input").value = savedId;
+        document.getElementById("user-name-input").value = savedName;
+        document.getElementById("user-display").textContent = savedName;
+        document.getElementById("setup-section").style.display = "none";
+        document.getElementById("emergency-section").style.display = "block";
+        document.getElementById("history-section").style.display = "block";
+        return true;
+      }
+      return false;
+    }
+
+    // ── 개인 링크로 접속: 알림만 활성화 ──────────────────────────
+    async function activateFromLink() {
+      const btn = document.getElementById("setup-btn");
+      btn.disabled = true;
+      btn.textContent = "활성화 중...";
+      await initPush();
+      document.getElementById("setup-section").style.display = "none";
+      document.getElementById("emergency-section").style.display = "block";
+      document.getElementById("history-section").style.display = "block";
+      showToast("✅ 완료! 이제 긴급 알림이 자동으로 수신됩니다.");
+      startPolling();
+    }
+
+    // ── 수동 설정 ────────────────────────────────────────────────
+    async function setupUser() {
+      const userId = parseInt(document.getElementById("user-id-input").value);
+      const userName = document.getElementById("user-name-input").value.trim();
+
+      if (!userId || !userName) {
+        showToast("⚠️ 사용자 ID와 이름을 모두 입력해주세요.");
+        return;
+      }
+
+      currentUserId = userId;
+      currentUserName = userName;
+      localStorage.setItem("mago_user_id", userId.toString());
+      localStorage.setItem("mago_user_name", userName);
+      document.getElementById("user-display").textContent = userName;
+
+      const btn = document.getElementById("setup-btn");
+      btn.disabled = true;
+      btn.textContent = "설정 중...";
+
+      await initPush();
+
+      document.getElementById("setup-section").style.display = "none";
+      document.getElementById("emergency-section").style.display = "block";
+      document.getElementById("history-section").style.display = "block";
+      showToast("✅ 설정 완료! 긴급 알림이 활성화되었습니다.");
+      startPolling();
+    }
+
+    // ── 푸시 알림 초기화 ─────────────────────────────────────────
+    async function initPush() {
+      if (!("serviceWorker" in navigator)) {
+        updatePushStatus("red", "푸시 미지원 브라우저");
+        return;
+      }
+      if (!("PushManager" in window)) {
+        updatePushStatus("red", "푸시 미지원");
+        return;
+      }
+
+      try {
+        updatePushStatus("yellow", "등록 중...");
+        swRegistration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        await navigator.serviceWorker.ready;
+
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          updatePushStatus("red", "알림 권한 거부됨");
+          showToast("⚠️ 알림 권한을 허용해야 긴급 알림을 받을 수 있습니다.");
+          return;
+        }
+
+        const keyRes = await fetch(`${API_BASE}/vapid-public-key`);
+        const { key } = await keyRes.json();
+
+        if (!key) {
+          updatePushStatus("yellow", "서버 설정 필요");
+          showToast("⚠️ VAPID 키가 설정되지 않았습니다. 서버 환경변수를 확인해주세요.");
+          return;
+        }
+
+        const subscription = await swRegistration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(key),
+        });
+
+        await fetch(`${API_BASE}/subscribe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: currentUserId, subscription }),
+        });
+
+        updatePushStatus("green", "알림 활성");
+
+        navigator.serviceWorker.addEventListener("message", (event) => {
+          if (event.data?.type === "EMERGENCY_CLICK") {
+            focusedEmergencyId = event.data.emergencyId;
+            loadEmergencies();
+            playAlert();
+          }
+        });
+
+      } catch (err) {
+        console.error("Push init error:", err);
+        updatePushStatus("red", "초기화 실패");
+        showToast("❌ 알림 초기화 실패: " + err.message);
+      }
+    }
+
+    function updatePushStatus(color, label) {
+      document.getElementById("push-dot").className = `dot ${color}`;
+      document.getElementById("push-label").textContent = label;
+    }
+
+    // ── 폴링 ────────────────────────────────────────────────────
+    function startPolling() {
+      loadEmergencies();
+      pollInterval = setInterval(loadEmergencies, 10000);
+    }
+
+    async function loadEmergencies() {
+      try {
+        const res = await fetch(`${API_BASE}/emergency`);
+        const { data } = await res.json();
+
+        const active = data.filter(e => e.status === "pending" || e.status === "acknowledged");
+        const history = data.filter(e => e.status === "responded" || e.status === "unacknowledged");
+
+        document.getElementById("active-count").textContent = `활성 긴급 ${active.length}건`;
+        renderEmergencies(active);
+        renderHistory(history.slice(0, 10));
+
+        if (focusedEmergencyId) {
+          const el = document.getElementById(`card-${focusedEmergencyId}`);
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      } catch (err) {
+        console.error("loadEmergencies error:", err);
+      }
+    }
+
+    // ── 렌더링 ──────────────────────────────────────────────────
+    function renderEmergencies(emergencies) {
+      const list = document.getElementById("emergency-list");
+      const empty = document.getElementById("empty-state");
+
+      if (emergencies.length === 0) {
+        list.innerHTML = "";
+        empty.style.display = "block";
+        return;
+      }
+      empty.style.display = "none";
+      list.innerHTML = emergencies.map(createEmergencyCard).join("");
+    }
+
+    function renderHistory(history) {
+      const list = document.getElementById("history-list");
+      if (history.length === 0) {
+        list.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:8px 0">처리 내역 없음</div>';
+        return;
+      }
+      list.innerHTML = history.map(createHistoryItem).join("");
+    }
+
+    function createEmergencyCard(e) {
+      const elapsed = formatElapsed(e.createdAt);
+      const isFocused = e.id === focusedEmergencyId;
+      const reminderBadge = e.reminderCount > 0
+        ? `<span class="reminder-badge">${e.reminderCount}회 재전송</span>`
+        : "";
+
+      const acknowledgedHtml = e.status === "pending"
+        ? `<button class="confirm-btn" onclick="acknowledge('${e.id}')">
+             🔔 확인 (알림 중지)
+           </button>`
+        : `<div style="margin-bottom:12px;color:var(--success);font-size:13px;display:flex;align-items:center;gap:6px;">
+             ✅ 확인됨 · ${formatTime(e.acknowledgedAt)}
+           </div>`;
+
+      const responseHtml = e.status === "acknowledged"
+        ? `<div class="response-buttons">
+             <button class="response-btn r10" onclick="respond('${e.id}','remote_within_10')">
+               <span>⚡</span><span class="label">10분 이내 원격 접속 가능</span>
+             </button>
+             <button class="response-btn r30" onclick="respond('${e.id}','remote_within_30')">
+               <span>🕐</span><span class="label">30분 이내 원격 접속 가능</span>
+             </button>
+             <button class="response-btn rno" onclick="respond('${e.id}','remote_unavailable')">
+               <span>❌</span><span class="label">30분 이내 원격 접속 불가</span>
+             </button>
+           </div>`
+        : "";
+
+      return `
+        <div class="emergency-card ${e.status}" id="card-${e.id}"
+             style="${isFocused ? 'outline:3px solid var(--warning);' : ''}">
+          <div class="emergency-header">
+            <span>🚨</span>
+            <h3>긴급 수정 요청 ${reminderBadge}</h3>
+            <span class="time">${elapsed}</span>
+          </div>
+          <div class="emergency-body">
+            <div class="shot-info">
+              <div class="shot-code">${e.shotCode}</div>
+              <div class="project-name">${e.projectName}</div>
+            </div>
+            ${acknowledgedHtml}
+            ${responseHtml}
+          </div>
+        </div>`;
+    }
+
+    function createHistoryItem(e) {
+      const statusMap = {
+        responded:      { icon: "✅", label: "처리 완료" },
+        unacknowledged: { icon: "⚠️", label: "미확인 처리" },
+      };
+      const responseMap = {
+        remote_within_10:  "10분 이내 원격 접속",
+        remote_within_30:  "30분 이내 원격 접속",
+        remote_unavailable: "30분 이내 접속 불가",
+      };
+      const s = statusMap[e.status] || { icon: "•", label: e.status };
+      const rLabel = e.responseType ? ` · ${responseMap[e.responseType] || e.responseType}` : "";
+
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;
+                    background:var(--surface);border-radius:8px;margin-bottom:8px;
+                    border:1px solid var(--border);">
+          <span style="font-size:18px">${s.icon}</span>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:600">
+              ${e.shotCode}
+              <span style="color:var(--text2);font-size:12px;font-weight:400"> ${e.projectName}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2)">
+              ${s.label}${rLabel} · ${formatTime(e.respondedAt || e.createdAt)}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ── 액션 ────────────────────────────────────────────────────
+    async function acknowledge(emergencyId) {
+      try {
+        await fetch(`${API_BASE}/emergency/${emergencyId}/acknowledge`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: currentUserId }),
+        });
+        showToast("✅ 확인 완료! 실장/PM에게 전달되었습니다.");
+        focusedEmergencyId = emergencyId;
+        await loadEmergencies();
+      } catch {
+        showToast("❌ 오류가 발생했습니다. 다시 시도해주세요.");
+      }
+    }
+
+    async function respond(emergencyId, responseType) {
+      try {
+        const res = await fetch(`${API_BASE}/emergency/${emergencyId}/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: currentUserId, responseType }),
+        });
+        const data = await res.json();
+        showToast(`📋 응답 전달 완료: ${data.label}`);
+        focusedEmergencyId = null;
+        await loadEmergencies();
+      } catch {
+        showToast("❌ 오류가 발생했습니다. 다시 시도해주세요.");
+      }
+    }
+
+    // ── 효과음 ──────────────────────────────────────────────────
+    function playAlert() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const beep = (freq, start, dur, vol = 0.8) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+          gain.gain.setValueAtTime(0, ctx.currentTime + start);
+          gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + start + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+          osc.start(ctx.currentTime + start);
+          osc.stop(ctx.currentTime + start + dur + 0.05);
+        };
+        beep(880,  0,   0.15);
+        beep(660,  0.2, 0.15);
+        beep(880,  0.4, 0.15);
+        beep(1100, 0.6, 0.25);
+        beep(880,  1.0, 0.15);
+        beep(660,  1.2, 0.15);
+        beep(880,  1.4, 0.15);
+        beep(1100, 1.6, 0.35);
+      } catch (e) {
+        console.warn("Audio not available:", e);
+      }
+    }
+
+    // ── 유틸 ────────────────────────────────────────────────────
+    function showToast(msg, duration = 3500) {
+      const toast = document.getElementById("toast");
+      toast.textContent = msg;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), duration);
+    }
+
+    function formatElapsed(ts) {
+      const diff = Math.floor((Date.now() - ts) / 1000);
+      if (diff < 60) return `${diff}초 전`;
+      if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+      return `${Math.floor(diff / 3600)}시간 전`;
+    }
+
+    function formatTime(ts) {
+      if (!ts) return "-";
+      return new Date(ts).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+      const padding = "=".repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+      const rawData = atob(base64);
+      return new Uint8Array([...rawData].map(c => c.charCodeAt(0)));
+    }
+
+    // ── 초기화 ──────────────────────────────────────────────────
+    const fromLink = checkUrlParam();
+    if (!fromLink) {
+      hasUser = loadSavedUser();
+      if (hasUser) {
+        initPush().then(() => startPolling());
+      }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && (hasUser || currentUserId)) {
+        loadEmergencies();
+      }
+    });
+  </script>
+</body>
+</html>
