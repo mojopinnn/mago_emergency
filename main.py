@@ -460,7 +460,11 @@ def generate_links(request: Request):
     관리자가 각 직원 링크를 복사해 카카오톡으로 전송.
     직원은 링크 접속 후 '알림 활성화' 버튼 한 번만 누르면 완료.
     """
-    base_url = os.environ.get("PUBLIC_BASE_URL", str(request.base_url).rstrip("/"))
+    base_url = (
+        os.environ.get("PUBLIC_BASE_URL")
+        or os.environ.get("BASE_URL")
+        or str(request.base_url).rstrip("/")
+    )
 
     try:
         sg = shotgrid_client.get_sg()
