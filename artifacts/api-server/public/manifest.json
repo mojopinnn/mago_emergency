@@ -1,0 +1,18 @@
+{
+  "name": "MAGO Emergency",
+  "short_name": "긴급알림",
+  "description": "MAGO 긴급 수정 알림 시스템",
+  "start_url": "/api/app",
+  "display": "standalone",
+  "background_color": "#0f0f1a",
+  "theme_color": "#ff4444",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/api/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
