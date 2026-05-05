@@ -1,0 +1,12 @@
+name = "mago-emergency"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# KV 바인딩
+[[kv_namespaces]]
+binding = "MAGO_KV"
+id = "여기에_KV_NAMESPACE_ID_입력"
+
+# 환경변수는 아래 명령으로 설정 (wrangler.toml에 직접 쓰지 말 것):
+#   npx wrangler secret put HOME_SERVER_URL
+#   npx wrangler secret put RELAY_SECRET
