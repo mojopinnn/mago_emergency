@@ -44,6 +44,17 @@ class ReceivedPatch:
     sender: str
 
 
+DEFAULT_EXCLUDE_GLOBS = (
+    "sender_config.json",
+    "receiver_config.json",
+    "mail_patch_outbox/**",
+    ".mail_patch_outbox/**",
+    ".mail_patch_inbox/**",
+    ".mail_patch_backups/**",
+    ".mail_patch_logs/**",
+)
+
+
 def utc_stamp() -> str:
     return dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
 
@@ -137,6 +148,14 @@ def _exclude_glob_pathspecs(exclude_globs: Iterable[str]) -> list[str]:
     return [f":(exclude){pattern}" for pattern in exclude_globs]
 
 
+def _merge_exclude_globs(exclude_globs: Iterable[str]) -> tuple[str, ...]:
+    merged = list(DEFAULT_EXCLUDE_GLOBS)
+    for pattern in exclude_globs:
+        if pattern not in merged:
+            merged.append(pattern)
+    return tuple(merged)
+
+
 def generate_patch(
     repo_path: Path,
     output_dir: Path,
@@ -149,11 +168,12 @@ def generate_patch(
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     effective_excludes = [output_dir, *exclude_paths]
+    effective_exclude_globs = _merge_exclude_globs(exclude_globs)
 
     intent_paths: list[str] = []
     try:
         if include_untracked:
-            intent_paths = _intent_to_add_untracked(repo_path, effective_excludes, exclude_globs)
+            intent_paths = _intent_to_add_untracked(repo_path, effective_excludes, effective_exclude_globs)
 
         diff_args = [
             "diff",
@@ -162,7 +182,7 @@ def generate_patch(
             "--",
             ".",
             *_exclude_pathspecs(repo_path, effective_excludes),
-            *_exclude_glob_pathspecs(exclude_globs),
+            *_exclude_glob_pathspecs(effective_exclude_globs),
         ]
         diff = run_git(repo_path, diff_args).stdout
         if not diff.strip():

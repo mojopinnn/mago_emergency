@@ -62,7 +62,7 @@ class MailPatchSyncTests(unittest.TestCase):
             (source / "mail_patch_outbox").mkdir()
             (source / "mail_patch_outbox" / "old.patch").write_text("secret\n", encoding="utf-8")
 
-            patch = generate_patch(source, source / "outbox")
+            patch = generate_patch(source, source / "mail_patch_outbox")
             patch_text = patch.path.read_text(encoding="utf-8")
 
             self.assertIn("main.py", patch_changed_paths(patch.path))
