@@ -92,13 +92,6 @@ const notes = [
   },
 ];
 
-const tabItems: Array<{ key: NavKey; label: string }> = [
-  { key: "today", label: "My Tasks" },
-  { key: "actions", label: "AMI Actions" },
-  { key: "jobs", label: "Running Jobs" },
-  { key: "notes", label: "Notes" },
-];
-
 const bottomNavItems: Array<{ key: NavKey; label: string }> = [
   { key: "today", label: "오늘" },
   { key: "actions", label: "AMI" },
@@ -181,27 +174,11 @@ export default function ShotGridMobileApp() {
             </div>
           </section>
 
-          <section className="mt-5 flex gap-2 overflow-x-auto pb-1">
-            {tabItems.map((item) => (
-              <button
-                className={`shrink-0 rounded-full border px-4 py-2 text-xs font-bold ${
-                  activeNav === item.key
-                    ? "border-blue-300/40 bg-blue-400/20 text-blue-100"
-                    : "border-white/10 bg-white/[0.04] text-slate-400"
-                }`}
-                key={item.key}
-                onClick={() => setActiveNav(item.key)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </section>
-
           {activeNav === "today" && (
             <section className="mt-6">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-sm font-black uppercase tracking-[0.18em] text-slate-400">
-                  Today
+                  오늘 작업
                 </h2>
                 <button className="text-xs font-bold text-blue-200">
                   전체 보기
@@ -274,7 +251,7 @@ export default function ShotGridMobileApp() {
           {activeNav === "actions" && (
             <section className="mt-6">
               <h2 className="mb-3 text-sm font-black uppercase tracking-[0.18em] text-slate-400">
-                AMI Actions
+                AMI 액션
               </h2>
               <div className="space-y-3">
                 {actions.map((action) => (
@@ -310,7 +287,7 @@ export default function ShotGridMobileApp() {
           {activeNav === "jobs" && (
             <section className="mt-6">
               <h2 className="mb-3 text-sm font-black uppercase tracking-[0.18em] text-slate-400">
-                Job Status
+                작업 상태
               </h2>
               <div className="space-y-3">
                 {jobs.map((job) => (
@@ -354,7 +331,7 @@ export default function ShotGridMobileApp() {
           {activeNav === "notes" && (
             <section className="mt-6">
               <h2 className="mb-3 text-sm font-black uppercase tracking-[0.18em] text-slate-400">
-                Notes
+                노트
               </h2>
               <div className="space-y-3">
                 {notes.map((note) => (
