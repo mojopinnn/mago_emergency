@@ -97,9 +97,17 @@ function getPreviewExamplePath(): string {
 }
 
 function Gallery() {
+  const basePath = getBasePath();
+  const previews = [
+    {
+      name: "ShotGridMobileApp",
+      description: "Mobile ShotGrid hub for AMI actions, jobs, and alerts.",
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
-      <div className="text-center max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 p-8">
+      <div className="w-full max-w-md text-center">
         <h1 className="text-2xl font-semibold text-gray-900 mb-3">
           Component Preview Server
         </h1>
@@ -112,6 +120,20 @@ function Gallery() {
             {getPreviewExamplePath()}
           </code>
         </p>
+        <div className="mt-8 space-y-3 text-left">
+          {previews.map((preview) => (
+            <a
+              className="block rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-gray-300 hover:shadow-md"
+              href={`${basePath}/preview/${preview.name}`}
+              key={preview.name}
+            >
+              <p className="font-semibold text-gray-900">{preview.name}</p>
+              <p className="mt-1 text-sm text-gray-500">
+                {preview.description}
+              </p>
+            </a>
+          ))}
+        </div>
       </div>
     </div>
   );
