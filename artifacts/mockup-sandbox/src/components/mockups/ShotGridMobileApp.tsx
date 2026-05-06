@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-type NavKey = "today" | "actions" | "jobs";
+type NavKey = "today" | "actions" | "jobs" | "notes";
 
 const shots = [
   {
@@ -77,6 +77,35 @@ const jobs = [
   },
 ];
 
+const notes = [
+  {
+    author: "Supervisor",
+    target: "EP104_SQ030_SH020",
+    body: "Edge matte 확인 후 v015로 재업로드 필요. 프리뷰 렌더 먼저 확인해주세요.",
+    time: "12분 전",
+  },
+  {
+    author: "PM",
+    target: "CF22_PACK_SH010",
+    body: "클라이언트 확인용 MOV만 먼저 전달하면 됩니다.",
+    time: "34분 전",
+  },
+];
+
+const tabItems: Array<{ key: NavKey; label: string }> = [
+  { key: "today", label: "My Tasks" },
+  { key: "actions", label: "AMI Actions" },
+  { key: "jobs", label: "Running Jobs" },
+  { key: "notes", label: "Notes" },
+];
+
+const bottomNavItems: Array<{ key: NavKey; label: string }> = [
+  { key: "today", label: "오늘" },
+  { key: "actions", label: "AMI" },
+  { key: "jobs", label: "작업" },
+  { key: "notes", label: "노트" },
+];
+
 function statusClass(status: string): string {
   if (status === "rev") {
     return "border-amber-400/30 bg-amber-400/10 text-amber-200";
@@ -108,7 +137,7 @@ export default function ShotGridMobileApp() {
           <span>5G</span>
         </div>
 
-        <main className="max-h-[860px] overflow-y-auto px-5 pb-24 pt-5">
+        <main className="max-h-[860px] overflow-y-auto px-5 pb-36 pt-5">
           <section className="rounded-[28px] border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -153,20 +182,19 @@ export default function ShotGridMobileApp() {
           </section>
 
           <section className="mt-5 flex gap-2 overflow-x-auto pb-1">
-            {["My Tasks", "AMI Actions", "Running Jobs", "Notes"].map(
-              (label, index) => (
-                <button
-                  className={`shrink-0 rounded-full border px-4 py-2 text-xs font-bold ${
-                    index === 0
-                      ? "border-blue-300/40 bg-blue-400/20 text-blue-100"
-                      : "border-white/10 bg-white/[0.04] text-slate-400"
-                  }`}
-                  key={label}
-                >
-                  {label}
-                </button>
-              ),
-            )}
+            {tabItems.map((item) => (
+              <button
+                className={`shrink-0 rounded-full border px-4 py-2 text-xs font-bold ${
+                  activeNav === item.key
+                    ? "border-blue-300/40 bg-blue-400/20 text-blue-100"
+                    : "border-white/10 bg-white/[0.04] text-slate-400"
+                }`}
+                key={item.key}
+                onClick={() => setActiveNav(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
           </section>
 
           {activeNav === "today" && (
@@ -322,22 +350,54 @@ export default function ShotGridMobileApp() {
               </div>
             </section>
           )}
+
+          {activeNav === "notes" && (
+            <section className="mt-6">
+              <h2 className="mb-3 text-sm font-black uppercase tracking-[0.18em] text-slate-400">
+                Notes
+              </h2>
+              <div className="space-y-3">
+                {notes.map((note) => (
+                  <article
+                    className="rounded-3xl border border-white/10 bg-white/[0.04] p-4"
+                    key={`${note.author}-${note.target}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold text-blue-200">
+                          {note.target}
+                        </p>
+                        <h3 className="mt-1 font-black text-white">
+                          {note.author}
+                        </h3>
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-500">
+                        {note.time}
+                      </span>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-slate-300">
+                      {note.body}
+                    </p>
+                    <button className="mt-4 w-full rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-black text-white">
+                      답글 작성
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
         </main>
 
-        <nav className="absolute bottom-5 left-1/2 grid w-[calc(100%-40px)] max-w-[390px] -translate-x-1/2 grid-cols-3 gap-2 rounded-[26px] border border-white/10 bg-[#101722]/95 p-2 shadow-2xl shadow-black/50 backdrop-blur">
-          {[
-            ["today", "오늘"],
-            ["actions", "AMI"],
-            ["jobs", "작업"],
-          ].map(([key, label]) => (
+        <nav className="absolute bottom-5 left-1/2 grid w-[calc(100%-40px)] max-w-[390px] -translate-x-1/2 grid-cols-4 gap-2 rounded-[26px] border border-white/10 bg-[#101722]/95 p-2 shadow-2xl shadow-black/50 backdrop-blur">
+          {bottomNavItems.map((item) => (
             <button
-              className={`rounded-2xl px-3 py-3 text-xs font-black transition ${navClass(
-                activeNav === key,
+              className={`rounded-2xl px-2 py-3 text-xs font-black transition ${navClass(
+                activeNav === item.key,
               )}`}
-              key={key}
-              onClick={() => setActiveNav(key as NavKey)}
+              key={item.key}
+              onClick={() => setActiveNav(item.key)}
             >
-              {label}
+              {item.label}
             </button>
           ))}
         </nav>
