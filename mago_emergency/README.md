@@ -27,7 +27,14 @@ VAPID_PUBLIC_KEY=BGMO3B-T28iHhBelsbHkk31FLlwTOJvsiZ7EVPI4mca-jiHaoASgdYNmBiljfhO
 VAPID_PRIVATE_KEY=RUk1JsBnVvTRwRAnmffGKN2GF1GzaV5YD1-kLRIt-Rw
 VAPID_EMAIL=mailto:admin@studiomago.com
 PORT=8080
+
+# 선택 권장: 운영 보안/저장소
+ADMIN_TOKEN=change_me_admin_token
+WEBHOOK_SECRET=change_me_webhook_secret
+MAGO_STORE_PATH=./data/store.json
 ```
+
+> 위 VAPID 값은 형식 예시입니다. 운영에서는 반드시 새 키를 생성해서 사용하세요.
 
 ### 4단계: 서버 시작
 ```bash
@@ -104,7 +111,7 @@ PM mago_emergency 실행
 |------|------|
 | `GET /app` | PWA 웹앱 |
 | `GET /healthz` | 서버 상태 확인 |
-| `POST /webhook/shotgrid` | ShotGrid AMI 웹훅 |
+| `POST /sg_webhook` | ShotGrid AMI 웹훅 |
 | `GET /emergency` | 긴급 상황 목록 |
 | `POST /emergency/{id}/acknowledge` | 확인 처리 |
 | `POST /emergency/{id}/respond` | 응답 처리 |
@@ -112,6 +119,37 @@ PM mago_emergency 실행
 | `GET /vapid-public-key` | VAPID 공개키 |
 | `POST /admin/setup-shotgrid-fields` | ShotGrid 필드 자동 생성 |
 | `GET /admin/users` | 사용자 목록 조회 |
+| `GET /admin/links` | 직원별 PWA 등록 링크 |
+
+---
+
+## 운영 보완 사항
+
+### 데이터 저장
+
+긴급 기록과 푸시 구독은 기본적으로 `./data/store.json`에 저장됩니다.
+경로를 바꾸려면 `MAGO_STORE_PATH`를 설정하세요. 서버를 재시작해도 브라우저 푸시 구독과 긴급 처리 이력이 유지됩니다.
+
+### 관리자 API 보호
+
+`ADMIN_TOKEN`을 설정하면 `/admin/*` API는 아래 중 하나로 토큰을 전달해야 접근할 수 있습니다.
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/admin/users
+curl -H "X-Admin-Token: $ADMIN_TOKEN" http://localhost:8080/admin/users
+```
+
+### 웹훅 보호
+
+`WEBHOOK_SECRET`을 설정하면 `/sg_webhook` 호출에 아래 중 하나가 필요합니다.
+
+```bash
+X-MAGO-Webhook-Secret: <WEBHOOK_SECRET>
+?secret=<WEBHOOK_SECRET>
+form field: secret=<WEBHOOK_SECRET>
+```
+
+Cloudflare Worker를 경유하는 경우 Worker secret에도 같은 `WEBHOOK_SECRET`을 설정하세요.
 
 ---
 

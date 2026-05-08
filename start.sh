@@ -4,6 +4,11 @@
 
 set -e
 
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+fi
+
 echo "=============================="
 echo "  MAGO Emergency Server 시작"
 echo "=============================="
@@ -16,9 +21,9 @@ if [ ! -f ".env" ]; then
 fi
 
 # 패키지 설치 확인
-if ! python -c "import fastapi" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import fastapi" 2>/dev/null; then
   echo "[설치] 패키지 설치 중..."
-  pip install -r requirements.txt
+  "$PYTHON_BIN" -m pip install -r requirements.txt
 fi
 
 echo "[시작] 서버를 시작합니다 (포트: ${PORT:-8080})"

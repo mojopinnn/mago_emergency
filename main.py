@@ -11,6 +11,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -37,6 +38,53 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _extract_bearer_token(request: Request) -> Optional[str]:
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return None
+
+
+def _require_admin_auth(request: Request) -> None:
+    """ADMIN_TOKEN이 설정된 경우 관리자 API 접근을 보호합니다."""
+    expected = os.environ.get("ADMIN_TOKEN", "")
+    if not expected:
+        return
+
+    supplied = (
+        _extract_bearer_token(request)
+        or request.headers.get("X-Admin-Token")
+        or request.query_params.get("adminToken")
+    )
+    if supplied != expected:
+        raise HTTPException(401, "Unauthorized")
+
+
+def _require_webhook_auth(request: Request, form_data) -> None:
+    """WEBHOOK_SECRET이 설정된 경우 ShotGrid/Worker 웹훅을 검증합니다."""
+    expected = os.environ.get("WEBHOOK_SECRET", "")
+    if not expected:
+        return
+
+    supplied = (
+        request.headers.get("X-MAGO-Webhook-Secret")
+        or request.query_params.get("secret")
+        or form_data.get("secret")
+    )
+    if supplied != expected:
+        raise HTTPException(401, "Unauthorized")
+
+
+def _parse_first_entity_id(selected_ids: str) -> int:
+    first_id = selected_ids.split(",")[0].strip()
+    if not first_id:
+        raise HTTPException(400, "selected_ids is required")
+    try:
+        return int(first_id)
+    except ValueError:
+        raise HTTPException(400, f"Invalid selected_ids: {selected_ids}")
 
 
 # ── 서버 생애주기 ─────────────────────────────────────────────────
@@ -70,7 +118,12 @@ async def _process_pending_queue():
             await cloudflare_kv.delete_pending_key(key)
             continue
 
-        entity_id = int(entity_id_str.split(",")[0].strip())
+        try:
+            entity_id = _parse_first_entity_id(entity_id_str)
+        except HTTPException:
+            logger.warning("대기열 항목에 유효하지 않은 selected_ids: %s", entity_id_str)
+            await cloudflare_kv.delete_pending_key(key)
+            continue
         task_info = shotgrid_client.get_task(entity_id)
 
         if task_info:
@@ -217,6 +270,7 @@ def unsubscribe(body: dict):
 async def sg_webhook(request: Request):
     """ShotGrid Action Menu Item 웹훅"""
     form_data = await request.form()
+    _require_webhook_auth(request, form_data)
 
     selected_ids_str = form_data.get("selected_ids", "")
     pm_name = form_data.get("user_name", "PM")
@@ -229,7 +283,7 @@ async def sg_webhook(request: Request):
     if not selected_ids_str:
         return {"status": "error", "message": "선택된 엔티티가 없습니다"}
 
-    entity_id = int(selected_ids_str.split(",")[0].strip())
+    entity_id = _parse_first_entity_id(selected_ids_str)
 
     if entity_type == "Task":
         task_info = shotgrid_client.get_task(entity_id)
@@ -429,8 +483,9 @@ async def respond(emergency_id: str, req: RespondRequest):
 # ── 관리자 API ───────────────────────────────────────────────────
 
 @app.post("/admin/setup-shotgrid-fields")
-def setup_shotgrid_fields():
+def setup_shotgrid_fields(request: Request):
     """ShotGrid 커스텀 필드 자동 생성 (최초 1회)"""
+    _require_admin_auth(request)
     try:
         results = shotgrid_client.setup_custom_fields()
         return {"ok": True, "results": results}
@@ -439,8 +494,9 @@ def setup_shotgrid_fields():
 
 
 @app.get("/admin/users")
-def list_users():
+def list_users(request: Request):
     """ShotGrid 활성 사용자 목록 (역할 설정 확인용)"""
+    _require_admin_auth(request)
     try:
         sg = shotgrid_client.get_sg()
         users = sg.find(
@@ -460,6 +516,7 @@ def generate_links(request: Request):
     관리자가 각 직원 링크를 복사해 카카오톡으로 전송.
     직원은 링크 접속 후 '알림 활성화' 버튼 한 번만 누르면 완료.
     """
+    _require_admin_auth(request)
     base_url = (
         os.environ.get("PUBLIC_BASE_URL")
         or os.environ.get("BASE_URL")
@@ -482,17 +539,21 @@ def generate_links(request: Request):
         name = u.get("name", "Unknown")
         role = u.get("sg_role") or "미설정"
         link = f"{base_url}/app?userId={uid}&userName={quote(name)}"
+        safe_name = escape(name)
+        safe_role = escape(role)
+        safe_link = escape(link, quote=True)
+        js_link = link.replace("\\", "\\\\").replace("'", "\\'")
         rows += f"""
         <tr>
-          <td>{name}</td>
-          <td><span class="role">{role}</span></td>
+          <td>{safe_name}</td>
+          <td><span class="role">{safe_role}</span></td>
           <td>
-            <input readonly value="{link}" onclick="this.select()"
+            <input readonly value="{safe_link}" onclick="this.select()"
               style="width:100%;background:#1a1a2e;border:1px solid #2a2a4a;
                      color:#e8e8f0;padding:6px 10px;border-radius:6px;font-size:12px;" />
           </td>
           <td>
-            <button onclick="navigator.clipboard.writeText('{link}')
+            <button onclick="navigator.clipboard.writeText('{js_link}')
                       .then(()=>this.textContent='✅ 복사됨')
                       .catch(()=>this.textContent='❌')"
               style="background:#ff4444;color:#fff;border:none;padding:6px 14px;

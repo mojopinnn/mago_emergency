@@ -9,6 +9,7 @@
  * 환경변수 (wrangler secret 으로 설정):
  *   HOME_SERVER_URL  : 집 서버 주소 (예: https://xxx.devtunnels.ms)
  *   RELAY_SECRET     : 워커 ↔ 집 서버 인증 토큰 (임의 문자열)
+ *   WEBHOOK_SECRET   : 서버 /sg_webhook 검증 토큰 (선택)
  *
  * KV 바인딩:
  *   MAGO_KV          : KV namespace
@@ -62,11 +63,17 @@ async function handleWebhook(request, env, ctx) {
       newForm.append(k, v);
     }
 
+    const headers = {};
+    if (env.RELAY_SECRET) headers["X-Relay-Secret"] = env.RELAY_SECRET;
+    if (env.WEBHOOK_SECRET) {
+      headers["X-MAGO-Webhook-Secret"] = env.WEBHOOK_SECRET;
+    }
+
     const response = await fetch(homeUrl, {
       method: "POST",
       body: newForm,
       signal: controller.signal,
-      headers: { "X-Relay-Secret": env.RELAY_SECRET || "" },
+      headers,
     });
 
     clearTimeout(timer);

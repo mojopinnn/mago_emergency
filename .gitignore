@@ -1,0 +1,8 @@
+node_modules/
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+data/
+mago_emergency/data/
