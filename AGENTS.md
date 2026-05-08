@@ -25,6 +25,8 @@ Generate VAPID keys with: `npx web-push generate-vapid-keys --json`
 - TypeScript has pre-existing errors in `artifacts/api-server/src/lib/shotgrid.ts` (union type access without narrowing). The esbuild-based build ignores these.
 - The `preinstall` script in root `package.json` enforces pnpm; using npm/yarn will fail.
 - ShotGrid integration requires real credentials for end-to-end webhook testing, but the server starts fine without them (all SG calls are lazy/on-demand).
+- All API routes are mounted under the `/api` prefix at runtime (e.g., `/api/healthz`, `/api/emergency`, `/api/subscribe`), even though route source files define paths without it.
+- When running `pnpm install` in some shell contexts, the preinstall hook may fail to detect pnpm. Use `pnpm install --ignore-scripts && pnpm rebuild` as a fallback.
 
 ### Lint & typecheck
 
