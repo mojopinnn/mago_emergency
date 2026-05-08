@@ -1,0 +1,29 @@
+node_modules/
+**/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Builds
+dist/
+build/
+coverage/
+.turbo/
+.vite/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+

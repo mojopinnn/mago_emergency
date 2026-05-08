@@ -23,8 +23,8 @@ cp .env.example .env
 SHOTGRID_URL=https://studiomago.shotgrid.autodesk.com
 SHOTGRID_SCRIPT_NAME=comp_script
 SHOTGRID_API_KEY=your_api_key
-VAPID_PUBLIC_KEY=BGMO3B-T28iHhBelsbHkk31FLlwTOJvsiZ7EVPI4mca-jiHaoASgdYNmBiljfhOQLQSnlKeOgHDTfm_M7WOVUvU
-VAPID_PRIVATE_KEY=RUk1JsBnVvTRwRAnmffGKN2GF1GzaV5YD1-kLRIt-Rw
+VAPID_PUBLIC_KEY=your_public_key
+VAPID_PRIVATE_KEY=your_private_key
 VAPID_EMAIL=mailto:admin@studiomago.com
 PORT=8080
 ```
