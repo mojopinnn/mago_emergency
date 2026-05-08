@@ -110,6 +110,11 @@ interface SGRawEntity {
   relationships?: Record<string, { data?: SGRelEntity | SGRelEntity[] }>;
 }
 
+function asSingleRel(rel: SGRelEntity | SGRelEntity[] | null | undefined): SGRelEntity | null {
+  if (!rel) return null;
+  return Array.isArray(rel) ? rel[0] ?? null : rel;
+}
+
 function parseAttrs(raw: SGRawEntity): Record<string, unknown> {
   const relationships: Record<string, unknown> = {};
   if (raw.relationships) {
@@ -184,7 +189,7 @@ export async function getShotById(shotId: number): Promise<SGShot | null> {
     )) as { data: SGRawEntity };
     const raw = data.data;
     const attrs = raw.attributes ?? {};
-    const projectRel = raw.relationships?.project?.data ?? null;
+    const projectRel = asSingleRel(raw.relationships?.project?.data ?? null);
 
     let project: { id: number; name: string } | null = null;
     if (projectRel) {
@@ -232,7 +237,7 @@ export async function getTaskById(taskId: number): Promise<SGTask | null> {
     )) as { data: SGRawEntity };
     const raw = data.data;
     const attrs = raw.attributes ?? {};
-    const projectRel = raw.relationships?.project?.data ?? null;
+    const projectRel = asSingleRel(raw.relationships?.project?.data ?? null);
     const entityRel = raw.relationships?.entity?.data ?? null;
 
     // task_assignees is a multi-entity relationship — comes back as array in relationships
