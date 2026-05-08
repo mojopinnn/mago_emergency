@@ -1,8 +1,9 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-shotgun-api3==3.8.3
+shotgun-api3==3.10.0
 pywebpush==2.0.0
 apscheduler==3.10.4
 python-dotenv==1.0.1
+python-multipart==0.0.27
 aiofiles==24.1.0
 httpx==0.27.2
