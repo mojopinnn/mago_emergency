@@ -22,6 +22,8 @@ class PushPayload:
     project_name: str
     type: str  # "emergency" | "reminder" | "status_update" | "unacknowledged"
     tag: Optional[str] = None
+    note: Optional[str] = None
+    version_label: Optional[str] = None
 
 
 def send_push(
@@ -49,6 +51,10 @@ def send_push(
         "type": payload.type,
         "tag": payload.tag or f"emergency-{payload.emergency_id}",
     }
+    if payload.note:
+        data["note"] = payload.note
+    if payload.version_label:
+        data["versionLabel"] = payload.version_label
 
     try:
         webpush(

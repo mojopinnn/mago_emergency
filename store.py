@@ -1,12 +1,16 @@
 """
-긴급 상황 및 푸시 구독 인메모리 저장소
+긴급 상황 및 푸시 구독 저장소
+구독 정보는 subscriptions.json 파일에 영구 저장 (서버 재시작 후에도 유지)
 """
+import json
+import logging
+import os
 import time
 import uuid
-import logging
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,7 @@ class EmergencyRecord:
     shot_id: int
     shot_code: str
     project_name: str
+    project_id: Optional[int]
     assignee_ids: list[int]
     created_at: float
     status: EmergencyStatus = EmergencyStatus.PENDING
@@ -46,6 +51,16 @@ class EmergencyRecord:
     reminder_count: int = 0
     last_reminder_at: Optional[float] = None
     notified_unacknowledged: bool = False
+    context_note: Optional[str] = None
+    version_id: Optional[int] = None
+    version_label: Optional[str] = None
+    ami_entity_type: Optional[str] = None
+    ami_initiator_user_id: Optional[int] = None
+    ami_initiator_name: Optional[str] = None
+    # 응답 완료 시 작업자 표시(ShotGrid 에서 응답 시점에 스냅샷)
+    responded_by_user_id: Optional[int] = None
+    responded_by_name: Optional[str] = None
+    responded_by_part: Optional[str] = None
 
 
 @dataclass
@@ -54,29 +69,72 @@ class PushSubscription:
     keys: dict  # {"p256dh": "...", "auth": "..."}
 
 
-# 저장소
 _emergencies: dict[str, EmergencyRecord] = {}
-_subscriptions: dict[int, PushSubscription] = {}  # userId → subscription
+_subscriptions: dict[int, PushSubscription] = {}
+
+_SUBS_FILE = Path(os.environ.get("SUBS_FILE", Path(__file__).parent / "subscriptions.json"))
 
 
-# ── Emergency CRUD ──────────────────────────────────────────────
+def _load_subscriptions_from_file() -> None:
+    if not _SUBS_FILE.exists():
+        return
+    try:
+        raw = json.loads(_SUBS_FILE.read_text(encoding="utf-8"))
+        for uid_str, sub in raw.items():
+            _subscriptions[int(uid_str)] = PushSubscription(
+                endpoint=sub["endpoint"],
+                keys=sub["keys"],
+            )
+        logger.info("구독 %s건 파일에서 복원: %s", len(_subscriptions), _SUBS_FILE)
+    except Exception as e:
+        logger.error("구독 파일 로드 실패 (무시하고 계속): %s", e)
+
+
+def _save_subscriptions_to_file() -> None:
+    try:
+        data = {
+            str(uid): {"endpoint": sub.endpoint, "keys": sub.keys}
+            for uid, sub in _subscriptions.items()
+        }
+        _SUBS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.error("구독 파일 저장 실패: %s", e)
+
+
+_load_subscriptions_from_file()
+
 
 def create_emergency(
     shot_id: int,
     shot_code: str,
     project_name: str,
     assignee_ids: list[int],
+    project_id: Optional[int] = None,
+    *,
+    context_note: Optional[str] = None,
+    version_id: Optional[int] = None,
+    version_label: Optional[str] = None,
+    ami_entity_type: Optional[str] = None,
+    ami_initiator_user_id: Optional[int] = None,
+    ami_initiator_name: Optional[str] = None,
 ) -> EmergencyRecord:
     record = EmergencyRecord(
         id=f"emg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}",
         shot_id=shot_id,
         shot_code=shot_code,
         project_name=project_name,
+        project_id=project_id,
         assignee_ids=assignee_ids,
         created_at=time.time(),
+        context_note=context_note,
+        version_id=version_id,
+        version_label=version_label,
+        ami_entity_type=ami_entity_type,
+        ami_initiator_user_id=ami_initiator_user_id,
+        ami_initiator_name=ami_initiator_name,
     )
     _emergencies[record.id] = record
-    logger.info(f"Emergency created: {record.id} / {shot_code}")
+    logger.info("Emergency created: %s / %s", record.id, shot_code)
     return record
 
 
@@ -90,7 +148,8 @@ def get_all_emergencies() -> list[EmergencyRecord]:
 
 def get_active_emergencies() -> list[EmergencyRecord]:
     return [
-        e for e in _emergencies.values()
+        e
+        for e in _emergencies.values()
         if e.status in (EmergencyStatus.PENDING, EmergencyStatus.ACKNOWLEDGED)
     ]
 
@@ -101,13 +160,17 @@ def acknowledge_emergency(emergency_id: str) -> Optional[EmergencyRecord]:
         return record
     record.acknowledged_at = time.time()
     record.status = EmergencyStatus.ACKNOWLEDGED
-    logger.info(f"Emergency acknowledged: {emergency_id}")
+    logger.info("Emergency acknowledged: %s", emergency_id)
     return record
 
 
 def respond_to_emergency(
     emergency_id: str,
     response_type: ResponseType,
+    *,
+    responded_by_user_id: Optional[int] = None,
+    responded_by_name: Optional[str] = None,
+    responded_by_part: Optional[str] = None,
 ) -> Optional[EmergencyRecord]:
     record = _emergencies.get(emergency_id)
     if not record:
@@ -115,7 +178,10 @@ def respond_to_emergency(
     record.responded_at = time.time()
     record.response_type = response_type
     record.status = EmergencyStatus.RESPONDED
-    logger.info(f"Emergency responded: {emergency_id} / {response_type}")
+    record.responded_by_user_id = responded_by_user_id
+    record.responded_by_name = responded_by_name
+    record.responded_by_part = responded_by_part
+    logger.info("Emergency responded: %s / %s", emergency_id, response_type)
     return record
 
 
@@ -125,7 +191,7 @@ def mark_unacknowledged(emergency_id: str) -> Optional[EmergencyRecord]:
         return None
     record.status = EmergencyStatus.UNACKNOWLEDGED
     record.notified_unacknowledged = True
-    logger.warning(f"Emergency unacknowledged: {emergency_id}")
+    logger.warning("Emergency unacknowledged: %s", emergency_id)
     return record
 
 
@@ -139,7 +205,6 @@ def increment_reminder(emergency_id: str) -> Optional[EmergencyRecord]:
 
 
 def needs_reminder(record: EmergencyRecord) -> bool:
-    """2분마다 리마인더 발송"""
     if record.status != EmergencyStatus.PENDING:
         return False
     TWO_MINUTES = 2 * 60
@@ -148,7 +213,6 @@ def needs_reminder(record: EmergencyRecord) -> bool:
 
 
 def needs_unacknowledged_alert(record: EmergencyRecord) -> bool:
-    """5분 미확인 시 에스컬레이션"""
     if record.status != EmergencyStatus.PENDING:
         return False
     if record.notified_unacknowledged:
@@ -157,11 +221,10 @@ def needs_unacknowledged_alert(record: EmergencyRecord) -> bool:
     return (time.time() - record.created_at) >= FIVE_MINUTES
 
 
-# ── Push Subscription ────────────────────────────────────────────
-
 def save_subscription(user_id: int, subscription: PushSubscription) -> None:
     _subscriptions[user_id] = subscription
-    logger.info(f"Subscription saved: userId={user_id}")
+    _save_subscriptions_to_file()
+    logger.info("Subscription saved: userId=%s", user_id)
 
 
 def get_subscription(user_id: int) -> Optional[PushSubscription]:
@@ -170,4 +233,9 @@ def get_subscription(user_id: int) -> Optional[PushSubscription]:
 
 def remove_subscription(user_id: int) -> None:
     _subscriptions.pop(user_id, None)
-    logger.info(f"Subscription removed: userId={user_id}")
+    _save_subscriptions_to_file()
+    logger.info("Subscription removed: userId=%s", user_id)
+
+
+def reset_for_testing() -> None:
+    _emergencies.clear()

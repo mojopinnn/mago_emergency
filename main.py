@@ -12,7 +12,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 from urllib.parse import quote
 
 from dotenv import load_dotenv
@@ -37,6 +37,197 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+class _AmiPack(NamedTuple):
+    shot_id: int
+    shot_code: str
+    project_name: str
+    project_id: Optional[int]
+    assignee_ids: list[int]
+    context_note: Optional[str]
+    version_id: Optional[int]
+    version_label: Optional[str]
+    ami_entity_type: str
+
+
+def _truncate_inline(text: str, max_chars: int) -> str:
+    t = (text or "").strip()
+    if len(t) <= max_chars:
+        return t
+    return t[: max_chars - 1].rstrip() + "…"
+
+
+def resolve_ami_initiator_from_form(form) -> tuple[Optional[int], Optional[str]]:
+    """
+    AMI form에서 실행자 ShotGrid HumanUser.id 를 복구.
+
+    우선순위: ``user_id`` 등 정수 후보 → ``user_login`` 으로 HumanUser 검색 → 이름만 저장.
+    ShotGrid AMI 기본 키: ``user_name``, ``user_login`` / 커스텀으로 ``user_id`` 전달 가능.
+    """
+    if not form:
+        return None, None
+
+    def pick(*keys: str) -> Optional[str]:
+        for k in keys:
+            v = form.get(k)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+        return None
+
+    raw_id = pick(
+        "user_id",
+        "User_id",
+        "initiator_user_id",
+        "current_user_id",
+        "ami_user_id",
+        "userid",
+        "userid_current",
+    )
+    uid: Optional[int] = None
+    if raw_id:
+        try:
+            uid = int(raw_id.split(",")[0].strip())
+        except ValueError:
+            uid = None
+
+    login = pick("user_login", "User_login")
+    name = pick("user_name", "User_name") or login
+
+    if uid is None and login:
+        uid = shotgrid_client.find_human_user_id_by_login(login)
+
+    return uid, name
+
+
+def _notify_cc_users_push(payload: push.PushPayload) -> None:
+    """emer_cc(실장) 그룹에게 동일 페이로드 발송(id 중복 시 1회)."""
+    seen: set[int] = set()
+    for user in shotgrid_client.iter_cc_users_deduped():
+        uid = int(user["id"])
+        if uid in seen:
+            continue
+        seen.add(uid)
+        sub = store.get_subscription(uid)
+        if sub:
+            ok = push.send_push(sub.endpoint, sub.keys, payload)
+            if not ok:
+                logger.warning("CC 푸시 전송 실패: userId=%s endpoint=%r", uid, sub.endpoint[:60])
+
+
+def _notify_follow_up_recipients(emergency: store.EmergencyRecord, payload: push.PushPayload) -> None:
+    """
+    확인·응답/미확인 에스컬레이션 결과를 AMI 실행자 + CC(실장 그룹)에게 알린다.
+    실행자가 CC 중 한 명이면 푸시는 1회만.
+    """
+    seen: set[int] = set()
+    initiator_id = emergency.ami_initiator_user_id
+    if initiator_id is not None:
+        uid = int(initiator_id)
+        seen.add(uid)
+        sub = store.get_subscription(uid)
+        if sub:
+            ok = push.send_push(sub.endpoint, sub.keys, payload)
+            if not ok:
+                logger.warning("발신자(AMI) 회신 푸시 전송 실패: userId=%s endpoint=%r", uid, sub.endpoint[:60])
+        else:
+            logger.info(
+                "AMI 실행자 userId=%s 는 푸시 구독 없음 — 확인/응답 회신 스킵(이름=%r)",
+                uid,
+                emergency.ami_initiator_name,
+            )
+
+    for user in shotgrid_client.iter_cc_users_deduped():
+        uid = int(user["id"])
+        if uid in seen:
+            continue
+        seen.add(uid)
+        sub = store.get_subscription(uid)
+        if sub:
+            ok = push.send_push(sub.endpoint, sub.keys, payload)
+            if not ok:
+                logger.warning("CC 회신 푸시 전송 실패: userId=%s endpoint=%r", uid, sub.endpoint[:60])
+
+
+def _body_head(project_name: str, shot_code: str, version_label: Optional[str]) -> str:
+    return (
+        f"[{project_name}] {shot_code} ({version_label})"
+        if version_label
+        else f"[{project_name}] {shot_code}"
+    )
+
+
+def resolve_ami_pack(entity_type: str, entity_id: int) -> _AmiPack:
+    """Task / Shot / Version AMI 공통 SG 조회. 실패 시 LookupError."""
+    et = (entity_type or "Task").strip()
+    if et == "Task":
+        task_info = shotgrid_client.get_task(entity_id)
+        if not task_info:
+            raise LookupError(f"Task {entity_id}를 찾을 수 없습니다")
+        task_name = task_info.get("content", f"Task_{entity_id}")
+        linked_entity = task_info.get("entity") or {}
+        shot_code = linked_entity.get("name", task_name)
+        proj = task_info.get("project") or {}
+        pid = int(proj["id"]) if isinstance(proj, dict) and proj.get("id") else None
+        pname = proj.get("name", "Unknown Project") if isinstance(proj, dict) else "Unknown Project"
+        assignee_ids = [int(a["id"]) for a in (task_info.get("task_assignees") or []) if a.get("id")]
+        return _AmiPack(
+            shot_id=entity_id,
+            shot_code=shot_code,
+            project_name=pname,
+            project_id=pid,
+            assignee_ids=assignee_ids,
+            context_note=None,
+            version_id=None,
+            version_label=None,
+            ami_entity_type="Task",
+        )
+
+    if et == "Shot":
+        shot = shotgrid_client.get_shot(entity_id)
+        if not shot:
+            raise LookupError(f"Shot {entity_id}를 찾을 수 없습니다")
+        shot_code = shot.get("code", f"Shot_{entity_id}")
+        proj = shot.get("project") or {}
+        pid = int(proj["id"]) if isinstance(proj, dict) and proj.get("id") else None
+        pname = proj.get("name", "Unknown Project") if isinstance(proj, dict) else "Unknown Project"
+        assignee_ids = []
+        for task in shotgrid_client.get_tasks_for_shot(entity_id):
+            for a in task.get("task_assignees") or []:
+                if a.get("id") and int(a["id"]) not in assignee_ids:
+                    assignee_ids.append(int(a["id"]))
+        return _AmiPack(
+            shot_id=entity_id,
+            shot_code=shot_code,
+            project_name=pname,
+            project_id=pid,
+            assignee_ids=assignee_ids,
+            context_note=None,
+            version_id=None,
+            version_label=None,
+            ami_entity_type="Shot",
+        )
+
+    if et == "Version":
+        vc = shotgrid_client.resolve_version_emergency_context(entity_id)
+        if not vc:
+            raise LookupError(f"Version {entity_id}를 찾을 수 없습니다")
+        return _AmiPack(
+            shot_id=vc.shot_id,
+            shot_code=vc.shot_code,
+            project_name=vc.project_name,
+            project_id=vc.project_id,
+            assignee_ids=vc.assignee_ids,
+            context_note=vc.note_preview,
+            version_id=entity_id,
+            version_label=vc.version_label,
+            ami_entity_type="Version",
+        )
+
+    raise LookupError(f"지원하지 않는 entity_type: {entity_type}")
 
 
 # ── 서버 생애주기 ─────────────────────────────────────────────────
@@ -71,37 +262,54 @@ async def _process_pending_queue():
             continue
 
         entity_id = int(entity_id_str.split(",")[0].strip())
-        task_info = shotgrid_client.get_task(entity_id)
+        entity_type = form.get("entity_type") or "Task"
 
-        if task_info:
-            task_name = task_info.get("content", f"Task_{entity_id}")
-            linked = task_info.get("entity") or {}
-            shot_code = linked.get("name", task_name)
-            project_name = (task_info.get("project") or {}).get("name", "Unknown")
-            assignee_ids = [a["id"] for a in (task_info.get("task_assignees") or [])]
-        else:
-            shot_code = f"Task_{entity_id}"
-            project_name = "Unknown"
-            assignee_ids = []
+        try:
+            pack = resolve_ami_pack(str(entity_type), entity_id)
+        except LookupError as exc:
+            logger.warning("KV 대기열 AMI 해석 실패 (key=%s): %s", key, exc)
+            await cloudflare_kv.delete_pending_key(key)
+            continue
 
+        ami_uid, ami_name = resolve_ami_initiator_from_form(form)
         emergency = store.create_emergency(
-            shot_id=entity_id,
-            shot_code=shot_code,
-            project_name=project_name,
-            assignee_ids=assignee_ids,
+            shot_id=pack.shot_id,
+            shot_code=pack.shot_code,
+            project_name=pack.project_name,
+            assignee_ids=pack.assignee_ids,
+            project_id=pack.project_id,
+            context_note=pack.context_note,
+            version_id=pack.version_id,
+            version_label=pack.version_label,
+            ami_entity_type=pack.ami_entity_type,
+            ami_initiator_user_id=ami_uid,
+            ami_initiator_name=ami_name,
         )
+
+        note_tail = ""
+        if pack.context_note:
+            note_tail = " " + _truncate_inline(pack.context_note, 220)
+
+        head = _body_head(pack.project_name, pack.shot_code, pack.version_label)
+        note_json = _truncate_inline(pack.context_note, 600) if pack.context_note else None
 
         # 작업자에게 지연 전달 알림
         artist_payload = push.PushPayload(
             title="🚨 긴급 수정 요청 (지연 전달)",
-            body=f"[{project_name}] {shot_code} - {queued_min_ago}분 전 발생한 긴급 요청입니다!",
+            body=(
+                f"{head} — {queued_min_ago}분 전 발생한 긴급 요청입니다.{note_tail}"
+                if note_tail
+                else f"{head} — {queued_min_ago}분 전 발생한 긴급 요청입니다."
+            ),
             emergency_id=emergency.id,
-            shot_code=shot_code,
-            project_name=project_name,
+            shot_code=pack.shot_code,
+            project_name=pack.project_name,
             type="emergency",
             tag=f"emergency-{emergency.id}",
+            note=note_json,
+            version_label=pack.version_label,
         )
-        for uid in assignee_ids:
+        for uid in pack.assignee_ids:
             sub = store.get_subscription(uid)
             if sub:
                 push.send_push(sub.endpoint, sub.keys, artist_payload)
@@ -110,22 +318,25 @@ async def _process_pending_queue():
         offline_payload = push.PushPayload(
             title="⚠️ 서버 오프라인 중 긴급 요청 발생",
             body=(
-                f"[{project_name}] {shot_code}"
-                f" - 서버 꺼짐 ({queued_min_ago}분 전) 중 긴급 요청이 발생했습니다. 지금 전달됩니다."
+                f"{head}"
+                f" — 서버 꺼짐 ({queued_min_ago}분 전) 중 긴급 요청이 발생했습니다. 지금 전달됩니다.{note_tail}"
+                if note_tail
+                else (
+                    f"{head}"
+                    f" — 서버 꺼짐 ({queued_min_ago}분 전) 중 긴급 요청이 발생했습니다. 지금 전달됩니다."
+                )
             ),
             emergency_id=emergency.id,
-            shot_code=shot_code,
-            project_name=project_name,
+            shot_code=pack.shot_code,
+            project_name=pack.project_name,
             type="unacknowledged",
             tag=f"offline-{emergency.id}",
+            note=note_json,
+            version_label=pack.version_label,
         )
-        for role in ["supervisor", "pm"]:
-            for user in shotgrid_client.get_users_by_role(role):
-                sub = store.get_subscription(user["id"])
-                if sub:
-                    push.send_push(sub.endpoint, sub.keys, offline_payload)
+        _notify_cc_users_push(offline_payload)
 
-        logger.info(f"대기열 처리 완료: {shot_code} (key={key})")
+        logger.info(f"대기열 처리 완료: {pack.shot_code} (key={key})")
         await cloudflare_kv.delete_pending_key(key)
 
 
@@ -211,7 +422,7 @@ def unsubscribe(body: dict):
 # AMI는 multipart/form-data로 전송합니다:
 #   selected_ids : 선택된 엔티티 ID (쉼표 구분)
 #   user_name    : AMI를 실행한 PM 이름
-#   entity_type  : Task 또는 Shot
+#   entity_type  : Task, Shot, Version
 
 @app.post("/sg_webhook")
 async def sg_webhook(request: Request):
@@ -231,89 +442,105 @@ async def sg_webhook(request: Request):
 
     entity_id = int(selected_ids_str.split(",")[0].strip())
 
-    if entity_type == "Task":
-        task_info = shotgrid_client.get_task(entity_id)
-        if not task_info:
-            raise HTTPException(404, f"Task {entity_id}를 찾을 수 없습니다")
+    try:
+        pack = resolve_ami_pack(str(entity_type), entity_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
-        task_name = task_info.get("content", f"Task_{entity_id}")
-        assignees = task_info.get("task_assignees") or []
-        assignee_ids = [a["id"] for a in assignees]
-        linked_entity = task_info.get("entity") or {}
-        shot_code = linked_entity.get("name", task_name)
-        project_name = (task_info.get("project") or {}).get("name", "Unknown Project")
+    ami_uid, ami_name = resolve_ami_initiator_from_form(form_data)
 
-    else:
-        # Shot 엔티티
-        shot = shotgrid_client.get_shot(entity_id)
-        if not shot:
-            raise HTTPException(404, f"Shot {entity_id}를 찾을 수 없습니다")
-
-        shot_code = shot.get("code", f"Shot_{entity_id}")
-        project_name = (shot.get("project") or {}).get("name", "Unknown Project")
-
-        tasks = shotgrid_client.get_tasks_for_shot(entity_id)
-        assignee_ids: list[int] = []
-        for task in tasks:
-            for a in task.get("task_assignees") or []:
-                if a["id"] not in assignee_ids:
-                    assignee_ids.append(a["id"])
-
-    logger.info(f"긴급 발동: {shot_code} / 담당자={assignee_ids} / PM={pm_name}")
+    logger.info(
+        "긴급 발동: et=%s %s / 담당자=%s / AMI표시명=%s / AMI실행자id=%s",
+        pack.ami_entity_type,
+        pack.shot_code,
+        pack.assignee_ids,
+        pm_name,
+        ami_uid,
+    )
 
     emergency = store.create_emergency(
-        shot_id=entity_id,
-        shot_code=shot_code,
-        project_name=project_name,
-        assignee_ids=assignee_ids,
+        shot_id=pack.shot_id,
+        shot_code=pack.shot_code,
+        project_name=pack.project_name,
+        assignee_ids=pack.assignee_ids,
+        project_id=pack.project_id,
+        context_note=pack.context_note,
+        version_id=pack.version_id,
+        version_label=pack.version_label,
+        ami_entity_type=pack.ami_entity_type,
+        ami_initiator_user_id=ami_uid,
+        ami_initiator_name=ami_name or (pm_name if pm_name and pm_name != "PM" else None),
     )
+
+    note_tail = ""
+    if pack.context_note:
+        note_tail = " " + _truncate_inline(pack.context_note, 240)
+
+    head = _body_head(pack.project_name, pack.shot_code, pack.version_label)
+    note_json = _truncate_inline(pack.context_note, 600) if pack.context_note else None
 
     # 작업자 알림
     artist_payload = push.PushPayload(
         title="🚨 긴급 수정 요청",
-        body=f"[{project_name}] {shot_code} 긴급 수정 발생! 즉시 확인해주세요.",
+        body=(
+            f"{head} 긴급 수정 발생! 즉시 확인해주세요.{note_tail}"
+            if note_tail
+            else f"{head} 긴급 수정 발생! 즉시 확인해주세요."
+        ),
         emergency_id=emergency.id,
-        shot_code=shot_code,
-        project_name=project_name,
+        shot_code=pack.shot_code,
+        project_name=pack.project_name,
         type="emergency",
         tag=f"emergency-{emergency.id}",
+        note=note_json,
+        version_label=pack.version_label,
     )
 
     sent_count = 0
-    for user_id in assignee_ids:
+    for user_id in pack.assignee_ids:
         sub = store.get_subscription(user_id)
         if sub:
-            push.send_push(sub.endpoint, sub.keys, artist_payload)
-            sent_count += 1
+            ok = push.send_push(sub.endpoint, sub.keys, artist_payload)
+            if ok:
+                sent_count += 1
+            else:
+                logger.warning(
+                    "작업자 푸시 전송 실패: userId=%s endpoint=%r", user_id, sub.endpoint[:60]
+                )
         else:
             logger.warning(f"작업자 {user_id} 푸시 구독 없음 (앱 미등록)")
 
-    # 실장/PM 알림
-    for role, role_label in [("supervisor", "실장"), ("pm", "PM")]:
-        role_users = shotgrid_client.get_users_by_role(role)
-        role_payload = push.PushPayload(
-            title=f"🚨 [{role_label}] 긴급 수정 발생",
-            body=f"[{project_name}] {shot_code} - 작업자 {len(assignee_ids)}명에게 알림 발송됨.",
-            emergency_id=emergency.id,
-            shot_code=shot_code,
-            project_name=project_name,
-            type="emergency",
-            tag=f"emergency-{role}-{emergency.id}",
-        )
-        for user in role_users:
-            sub = store.get_subscription(user["id"])
-            if sub:
-                push.send_push(sub.endpoint, sub.keys, role_payload)
+    # 실장/PM(참조) 알림: emer_cc 그룹 + PM 표식 사용자(shotgrid_client.iter_cc_users_deduped)
+    cc_note = ""
+    if pack.context_note:
+        cc_note = " — " + _truncate_inline(pack.context_note, 160)
+    cc_payload = push.PushPayload(
+        title="🚨 [참조] 긴급 수정 발생",
+        body=(
+            f"{head} — 작업자 {len(pack.assignee_ids)}명에게 알림 발송됨.{cc_note}"
+            if cc_note
+            else f"{head} — 작업자 {len(pack.assignee_ids)}명에게 알림 발송됨."
+        ),
+        emergency_id=emergency.id,
+        shot_code=pack.shot_code,
+        project_name=pack.project_name,
+        type="emergency",
+        tag=f"emergency-cc-{emergency.id}",
+        note=note_json,
+        version_label=pack.version_label,
+    )
+    _notify_cc_users_push(cc_payload)
 
     store.increment_reminder(emergency.id)
 
     return {
         "ok": True,
         "emergencyId": emergency.id,
-        "shotCode": shot_code,
-        "projectName": project_name,
-        "assigneeCount": len(assignee_ids),
+        "shotCode": pack.shot_code,
+        "projectName": pack.project_name,
+        "assigneeCount": len(pack.assignee_ids),
         "sentCount": sent_count,
+        "versionLabel": pack.version_label,
     }
 
 
@@ -325,6 +552,7 @@ def _record_to_dict(r: store.EmergencyRecord) -> dict:
         "shotId": r.shot_id,
         "shotCode": r.shot_code,
         "projectName": r.project_name,
+        "projectId": r.project_id,
         "assigneeIds": r.assignee_ids,
         "createdAt": int(r.created_at * 1000),
         "status": r.status.value,
@@ -334,6 +562,15 @@ def _record_to_dict(r: store.EmergencyRecord) -> dict:
         "reminderCount": r.reminder_count,
         "lastReminderAt": int(r.last_reminder_at * 1000) if r.last_reminder_at else None,
         "notifiedUnacknowledged": r.notified_unacknowledged,
+        "contextNote": r.context_note,
+        "versionId": r.version_id,
+        "versionLabel": r.version_label,
+        "amiEntityType": r.ami_entity_type,
+        "amiInitiatorUserId": r.ami_initiator_user_id,
+        "amiInitiatorName": r.ami_initiator_name,
+        "respondedByUserId": r.responded_by_user_id,
+        "respondedByName": r.responded_by_name,
+        "respondedByPart": r.responded_by_part,
     }
 
 
@@ -360,27 +597,6 @@ async def acknowledge(emergency_id: str, req: AcknowledgeRequest):
     if not record:
         raise HTTPException(404, "Emergency not found or already processed")
 
-    acknowledger_name = "작업자"
-    if req.userId:
-        user = shotgrid_client.get_user_by_id(req.userId)
-        if user:
-            acknowledger_name = user.get("name", "작업자")
-
-    notify_payload = push.PushPayload(
-        title="✅ 긴급 알림 확인됨",
-        body=f"[{record.project_name}] {record.shot_code} - {acknowledger_name}님이 확인했습니다.",
-        emergency_id=record.id,
-        shot_code=record.shot_code,
-        project_name=record.project_name,
-        type="status_update",
-        tag=f"ack-{record.id}",
-    )
-    for role in ["supervisor", "pm"]:
-        for user in shotgrid_client.get_users_by_role(role):
-            sub = store.get_subscription(user["id"])
-            if sub:
-                push.send_push(sub.endpoint, sub.keys, notify_payload)
-
     return {"ok": True, "data": _record_to_dict(record)}
 
 
@@ -396,15 +612,30 @@ async def respond(emergency_id: str, req: RespondRequest):
     except ValueError:
         raise HTTPException(400, f"Invalid responseType: {req.responseType}")
 
-    record = store.respond_to_emergency(emergency_id, response_type)
+    responder_uid: Optional[int] = None
+    responder_name_snap: Optional[str] = None
+    responder_part_snap: Optional[str] = None
+    if req.userId:
+        responder_uid = int(req.userId)
+        user = shotgrid_client.get_user_by_id(responder_uid)
+        if user:
+            responder_name_snap = (user.get("name") or "").strip() or None
+            pf = shotgrid_client.user_part_field()
+            raw_part = user.get(pf)
+            if raw_part is not None and str(raw_part).strip():
+                responder_part_snap = str(raw_part).strip()
+
+    record = store.respond_to_emergency(
+        emergency_id,
+        response_type,
+        responded_by_user_id=responder_uid,
+        responded_by_name=responder_name_snap,
+        responded_by_part=responder_part_snap,
+    )
     if not record:
         raise HTTPException(404, "Emergency not found")
 
-    responder_name = "작업자"
-    if req.userId:
-        user = shotgrid_client.get_user_by_id(req.userId)
-        if user:
-            responder_name = user.get("name", "작업자")
+    responder_name = responder_name_snap or "작업자"
 
     label = store.RESPONSE_LABELS[response_type]
 
@@ -417,11 +648,7 @@ async def respond(emergency_id: str, req: RespondRequest):
         type="status_update",
         tag=f"respond-{record.id}",
     )
-    for role in ["supervisor", "pm"]:
-        for user in shotgrid_client.get_users_by_role(role):
-            sub = store.get_subscription(user["id"])
-            if sub:
-                push.send_push(sub.endpoint, sub.keys, notify_payload)
+    _notify_follow_up_recipients(record, notify_payload)
 
     return {"ok": True, "data": _record_to_dict(record), "label": label}
 
@@ -440,15 +667,17 @@ def setup_shotgrid_fields():
 
 @app.get("/admin/users")
 def list_users():
-    """ShotGrid 활성 사용자 목록 (역할 설정 확인용)"""
+    """ShotGrid 활성 사용자 목록 (CC 표식 필드 확인용)"""
     try:
         sg = shotgrid_client.get_sg()
+        rf = shotgrid_client.cc_marker_field()
+        fields = ["id", "name", "email", "login", rf]
         users = sg.find(
             "HumanUser",
             [["sg_status_list", "is", "act"]],
-            ["id", "name", "email", "login", "sg_role"],
+            fields,
         )
-        return {"data": users}
+        return {"data": users, "ccMarkerField": rf}
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -468,10 +697,11 @@ def generate_links(request: Request):
 
     try:
         sg = shotgrid_client.get_sg()
+        rf = shotgrid_client.cc_marker_field()
         users = sg.find(
             "HumanUser",
             [["sg_status_list", "is", "act"]],
-            ["id", "name", "email", "login", "sg_role"],
+            ["id", "name", "email", "login", rf],
         )
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -480,7 +710,7 @@ def generate_links(request: Request):
     for u in users:
         uid = u["id"]
         name = u.get("name", "Unknown")
-        role = u.get("sg_role") or "미설정"
+        role = u.get(rf) or "미설정"
         link = f"{base_url}/app?userId={uid}&userName={quote(name)}"
         rows += f"""
         <tr>
@@ -525,7 +755,7 @@ def generate_links(request: Request):
      링크 접속 후 <strong>알림 활성화</strong> 버튼 한 번만 누르면 이후 자동으로 긴급 알림이 수신됩니다.</p>
   <table>
     <thead>
-      <tr><th>이름</th><th>역할</th><th>개인 링크</th><th></th></tr>
+      <tr><th>이름</th><th>CC표식</th><th>개인 링크</th><th></th></tr>
     </thead>
     <tbody>{rows}</tbody>
   </table>

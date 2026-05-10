@@ -23,12 +23,49 @@ async def _send_to_user(user_id: int, payload: push.PushPayload) -> bool:
     return push.send_push(sub.endpoint, sub.keys, payload)
 
 
-async def _send_to_roles(roles: list[str], payload: push.PushPayload) -> None:
-    for role in roles:
-        for user in shotgrid_client.get_users_by_role(role):
-            sub = store.get_subscription(user["id"])
-            if sub:
-                push.send_push(sub.endpoint, sub.keys, payload)
+async def _send_cc_escalation(emergency: store.EmergencyRecord, payload: push.PushPayload) -> None:
+    """
+    5분 미확인 에스컬레이션 대상에게 발송.
+    - AMI 실행자(발신자) + emer_cc 그룹 (shotgrid_client.iter_cc_users_deduped)
+    """
+    seen: set[int] = set()
+
+    initiator_id = getattr(emergency, "ami_initiator_user_id", None)
+    if initiator_id is not None:
+        uid = int(initiator_id)
+        seen.add(uid)
+        sub = store.get_subscription(uid)
+        if sub:
+            ok = push.send_push(sub.endpoint, sub.keys, payload)
+            if not ok:
+                logger.warning(
+                    "발신자(AMI) 미확인 에스컬레이션 푸시 전송 실패: userId=%s endpoint=%r",
+                    uid,
+                    sub.endpoint[:60],
+                )
+        else:
+            logger.info(
+                "발신자(AMI) userId=%s 는 푸시 구독 없음 — 미확인 에스컬레이션 스킵",
+                uid,
+            )
+
+    for user in shotgrid_client.iter_cc_users_deduped():
+        uid = user.get("id")
+        if uid is None:
+            continue
+        i = int(uid)
+        if i in seen:
+            continue
+        seen.add(i)
+        sub = store.get_subscription(i)
+        if sub:
+            ok = push.send_push(sub.endpoint, sub.keys, payload)
+            if not ok:
+                logger.warning(
+                    "CC 미확인 에스컬레이션 푸시 전송 실패: userId=%s endpoint=%r",
+                    i,
+                    sub.endpoint[:60],
+                )
 
 
 async def tick() -> None:
@@ -55,7 +92,7 @@ async def tick() -> None:
                 type="unacknowledged",
                 tag=f"unack-{emergency.id}",
             )
-            await _send_to_roles(["supervisor", "pm"], payload)
+            await _send_cc_escalation(emergency, payload)
             continue
 
         # 2분마다 리마인더
