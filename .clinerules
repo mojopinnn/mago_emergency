@@ -1,0 +1,20 @@
+# [Rule] Unified Environment Variables & Key Management Rule for Cline
+
+## 1. 절대 규칙 (Never Violate)
+- 소스코드 내부에 API Key, 패스워드, 외부 URL, 포트 번호 등 민감한 정보(Secrets)를 직접 입력(Hardcoding)하는 것을 절대 금지한다.
+- 실물 정보는 무조건 시스템 환경변수(Environment Variables)로부터 동적으로 읽어오도록 코드를 구현한다.
+
+## 2. 언어별 코딩 표준 (Coding Standard)
+- **Node.js (JavaScript / TypeScript)**:
+  - 중요 환경 변수는 반드시 `process.env.VARIABLE_NAME` 형식을 통해 참조한다.
+  - 외부 서비스 연결 시 포트는 항상 `process.env.PORT || 8080`과 같이 동적 할당되도록 처리한다.
+- **Python**:
+  - 중요 환경 변수는 반드시 `os.environ.get("VARIABLE_NAME")` 또는 `os.getenv("VARIABLE_NAME")` 형식을 사용한다.
+
+## 3. 파일 및 저장소 관리 규칙 (Git & File Rule)
+- 실물 키값이 들어가는 `.env` 파일은 절대 Git 저장소에 커밋하지 않는다. (무조건 `.gitignore`에 등록할 것)
+- 새로운 환경변수를 도입할 경우, 반드시 실제 키값이 비어 있는 `.env.example` 파일을 세트로 작성하거나 업데이트하여 다른 개발자가 구조를 파악할 수 있게 한다.
+
+## 4. 배포 연동 (Deployment Integration)
+- 새로운 환경변수가 코드에 추가되는 즉시, 배포 스크립트(`deploy_gcp.sh` 또는 Dockerfile 등)에도 해당 변수를 주입하는 코드를 자동으로 함께 반영한다.
+- 배포 프로세스 및 환경변수 주입에 관한 자세한 가이드는 프로젝트 루트의 `DEPLOY_GUIDE.md` 파일을 최우선 참고한다.

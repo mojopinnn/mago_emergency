@@ -752,15 +752,6 @@
         </div>`;
     }
 
-    function escapeHtml(s) {
-      if (s == null) return "";
-      return String(s)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-    }
-
     function createHistoryItem(e) {
       const statusMap = {
         responded:      { icon: "✅", label: "회신 완료" },
@@ -774,10 +765,6 @@
       const s = statusMap[e.status] || { icon: "•", label: e.status };
       const r = e.responseType ? (responseMap[e.responseType] || { text: e.responseType, cls: "" }) : null;
       const rBadge = r ? `<span class="badge ${r.cls}">${r.text}</span>` : "";
-      const who =
-        e.status === "responded" && e.respondedByName
-          ? `<span class="responder-line">${escapeHtml(e.respondedByName)}${e.respondedByPart ? " " + escapeHtml(e.respondedByPart) : ""}</span>`
-          : "";
 
       return `
         <div class="history-item">
@@ -790,7 +777,7 @@
             <div class="meta">
               <span>${s.label}</span>
               ${rBadge}
-              ${who ? who + " " : ""}<span>· ${formatHistoryDateTime(e.respondedAt || e.createdAt)}</span>
+              <span>· ${formatHistoryDateTime(e.respondedAt || e.createdAt)}</span>
             </div>
           </div>
         </div>`;
